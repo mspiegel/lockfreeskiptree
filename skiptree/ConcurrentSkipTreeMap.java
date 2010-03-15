@@ -73,6 +73,16 @@ public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * that stores multiple data items. The skip tree improves spatial
      * locality by storing multiple items per container.
      * 
+     * The lock-free skip tree is explained in "Lock-Free Multiway Search Trees"
+     * (Spiegel & Reynolds, 2010) submitted for publication. The
+     * skip tree was defined by (Messeguer, 1997). An isomorphism between
+     * the skip list and the B-tree has been noted in other sources, including
+     * (Munro, Papadakis, and Sedgewick, 1992). The skip list was defined by
+     * (Pugh, 1990). The "link" pointer was first used in the definition of
+     * the B^link-tree by (Lehman and Yao, 1981) and refined by (Sagiv, 1985).
+     * The Michael-Harris algorithm for lock-free linked lists can be found
+     * in (Michael, 2002) and (Harris, 2001).
+     * 
      * The lock-free skip tree consists of several linked lists 
      * stacked on top of each other. Each node holds a volatile reference 
      * to a container. Each container stores an array of keys, an array
@@ -114,6 +124,10 @@ public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      *      than or equal to all elements of the node in
      *      all possible futures.
      */
+    
+    private static final int logAvgLength = 5; // log_2 of the average node length
+    private static final int avgLength = (1 << logAvgLength);
+    private static final int avgLengthMinusOne = (avgLength - 1);
     
     private static final long serialVersionUID = -8380871345797974329L;
 
@@ -300,8 +314,8 @@ public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
             throw new NullPointerException();
         Iterator<? extends Map.Entry<? extends K, ? extends V>> it =
             map.entrySet().iterator();
-        Object[] keys = new Object[32];
-        Object[] values = (valueProxy == null) ? new Object[32] : null;
+        Object[] keys = new Object[avgLength];
+        Object[] values = (valueProxy == null) ? new Object[avgLength] : null;
         Node<K,V> current = null;
         int leafCount = 0, totalCount = 0;
         while (it.hasNext()) {
@@ -312,12 +326,12 @@ public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
             if (valueProxy == null) values[leafCount] = nextValue;
             leafCount++; 
             totalCount++;
-            if (leafCount % 32 == 0) {
-                leafCount = 0;                
+            if (leafCount % avgLength == 0) {
+                leafCount = 0;
                 current = buildFromSortedLeaf(keys, values, current);
                 buildFromSortedNonLeaf(totalCount, nextKey);    
-                keys = new Object[32];
-                values = (valueProxy == null) ? new Object[32] : null;                
+                keys = new Object[avgLength];
+                values = (valueProxy == null) ? new Object[avgLength] : null;                
             }
         }
         if (leafCount > 0) {
@@ -353,8 +367,8 @@ public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     
     private void buildFromSortedNonLeaf(int totalCount, K nextKey) {
         int theCount = totalCount, height = 0;                
-        while ((theCount & 0x1F) == 0) {
-            theCount >>>= 5;
+        while ((theCount & avgLengthMinusOne) == 0) {
+            theCount >>>= logAvgLength;
             height++;
         }
         SearchResults[] results = new SearchResults[height + 1];
@@ -2292,14 +2306,14 @@ public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         x ^= x >>> 17;
         randomSeed = x ^= x << 5;
         int level = 1;
-        while ((x & 0x1F) == 0) {
+        while ((x & avgLengthMinusOne) == 0) {
             if ((level % 6) == 0) {
                 x = randomSeed;
                 x ^= x << 13;
                 x ^= x >>> 17;
                 randomSeed = x ^= x << 5;
             } else {
-                x >>>= 5;
+                x >>>= logAvgLength;
             }
             level++;
         }
