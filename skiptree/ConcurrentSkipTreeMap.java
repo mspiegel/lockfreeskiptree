@@ -60,7 +60,7 @@ import java.util.concurrent.atomic.*;
  * @param <V> the type of mapped values
  */
 @SuppressWarnings("unchecked")
-public final class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V> 
+public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V> 
     implements ConcurrentNavigableMap<K,V>,
     Cloneable,
     java.io.Serializable    {
