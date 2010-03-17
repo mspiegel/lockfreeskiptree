@@ -1,4 +1,4 @@
-package skiptree.test;
+package edu.virginia.cs.skiptree.test;
 
 /*
  * Written by Doug Lea with assistance from members of JCP JSR-166
@@ -10,7 +10,8 @@ import junit.framework.*;
 import java.util.*;
 import java.io.*;
 
-import skiptree.ConcurrentSkipTreeSet;
+import edu.virginia.cs.skiptree.ConcurrentSkipTreeSet;
+
 
 
 public class ConcurrentSkipTreeSubSetTest extends JSR166TestCase {

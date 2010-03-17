@@ -5,7 +5,7 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
-package skiptree;
+package edu.virginia.cs.skiptree;
 import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.*;

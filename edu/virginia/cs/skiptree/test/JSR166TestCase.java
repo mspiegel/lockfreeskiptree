@@ -1,4 +1,4 @@
-package skiptree.test;
+package edu.virginia.cs.skiptree.test;
 
 /*
  * Written by Doug Lea with assistance from members of JCP JSR-166

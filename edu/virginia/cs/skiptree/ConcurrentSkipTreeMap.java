@@ -5,7 +5,7 @@
  * http://creativecommons.org/licenses/publicdomain
  */
 
-package skiptree;
+package edu.virginia.cs.skiptree;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;

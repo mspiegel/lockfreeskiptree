@@ -1,4 +1,4 @@
-package skiptree.test;
+package edu.virginia.cs.skiptree.test;
 /*
  * Written by Doug Lea with assistance from members of JCP JSR-166
  * Expert Group and released to the public domain, as explained at
@@ -10,7 +10,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.io.*;
 
-import skiptree.ConcurrentSkipTreeSet;
+import edu.virginia.cs.skiptree.ConcurrentSkipTreeSet;
+
 
 
 public class ConcurrentSkipTreeSetTest extends JSR166TestCase {
