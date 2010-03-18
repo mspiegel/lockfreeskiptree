@@ -969,8 +969,9 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         /** The state of the iterator. */
         Node<K,V> previousNode, node;
         Contents<K,V> previousContents, contents;
+        Object[] keys, values;
         /** Cache of the next key field to return */
-        K nextKey;
+        Object nextKey;
         /** Cache of next value field to maintain weak consistency */
         V nextValue;
         /** the index within the state of the iterator */
@@ -982,52 +983,55 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
             if (results != null) {
                 node = results.node;
                 contents = results.contents;
-                nextKey = (K) contents.keys[0];
-                nextValue = (valueProxy == null) ? (V) contents.values[0] : valueProxy;
+                keys = contents.keys;
+                values = contents.values;
+                nextKey = keys[0];
+                nextValue = (valueProxy == null) ? (V) values[0] : valueProxy;
+                previousNode = node;
+                previousContents = contents;
+                index = 0;               
+            } else {
+                nextKey = PositiveInfinity.INSTANCE;
             }
+            previousIndex = -1;
         }
 
         public final boolean hasNext() {
-            return contents != null;
+            return nextKey != PositiveInfinity.INSTANCE;
         }
 
         /** Advances next to higher entry. */
         final void advance() {
-            if (contents == null)
-                throw new NoSuchElementException();            
+            if (nextKey == PositiveInfinity.INSTANCE)
+                throw new NoSuchElementException();
             previousNode = node;
-            previousContents = contents;
+            previousContents = contents;            
             previousIndex = index++;
-            if ((index == contents.keys.length - 1) && 
-                    (contents.keys[index] == PositiveInfinity.INSTANCE)) {
-                contents = null;
-            } else if (index == contents.keys.length) {
+            if (index == contents.keys.length) {
                 node = contents.link;
                 contents = node.contents;
                 while(contents.keys.length == 0) {
                     node = contents.link;
                     contents = node.contents;
                 }
-                if (contents.keys[0] == PositiveInfinity.INSTANCE){
-                    contents = null;
-                } else {
-                    index = 0;
-                    nextKey = (K) contents.keys[0];
-                    nextValue = (valueProxy == null) ? (V) contents.values[0] : valueProxy;
-                }
+                keys = contents.keys;
+                values = contents.values;
+                index = 0;
+                nextKey = keys[0];
+                nextValue = (valueProxy == null) ? (V) values[0] : valueProxy;
             } else {
-                nextKey = (K) contents.keys[index];
-                nextValue = (valueProxy == null) ? (V) contents.values[index] : valueProxy;
+                nextKey = keys[index];
+                nextValue = (valueProxy == null) ? (V) values[index] : valueProxy;
             }
         }
 
         public void remove() {
-            if (previousContents == null)
+            if (previousIndex < 0)
                 throw new IllegalStateException();
             K key = (K) previousContents.keys[previousIndex];
             SearchResults<K,V> results = new SearchResults<K,V>(previousNode, previousContents, previousIndex);
             removeFromNode(comparable(key), null, results);
-            previousContents = null;
+            previousIndex = -1;
         }
 
     }    
@@ -1042,18 +1046,18 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     
     final class KeyIterator extends Iter<K> {
         public K next() {
-            K k = nextKey;
+            Object okey = nextKey;
             advance();
-            return k;
+            return (K) okey;
         }
     }
     
     final class EntryIterator extends Iter<Map.Entry<K,V>> {
         public Map.Entry<K,V> next() {
-            K k = nextKey;
+            Object okey = nextKey;
             V v = nextValue;
             advance();
-            return new AbstractMap.SimpleImmutableEntry<K,V>(k, v);
+            return new AbstractMap.SimpleImmutableEntry<K,V>((K) okey, v);
         }
     }    
     
