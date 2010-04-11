@@ -1769,7 +1769,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     
     /* ---------------- Finding and removing last element -------------- */
 
-    private SearchResults<K,V> findLastBuildStack(Stack<SearchResults<K,V>> stack) {
+    private SearchResults<K,V> findLastBuildStack(Deque<SearchResults<K,V>> stack) {
         Node<K,V> node = this.root.node;
         Contents<K,V> contents = node.contents;
         while(contents.children != null) {
@@ -1830,7 +1830,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @return last node or null if empty
      */
     SearchResults<K,V> findLast() {
-        Stack<SearchResults<K,V>> stack = new Stack<SearchResults<K,V>>();
+        Deque<SearchResults<K,V>> stack = new ArrayDeque<SearchResults<K,V>>();
         SearchResults<K,V> predecessor = findLastBuildStack(stack);
         while(predecessor == null && !stack.isEmpty()) {
            SearchResults<K,V> next = stack.pop();
@@ -1953,7 +1953,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     }    
         
     SearchResults<K,V> doFindPredecessor(Comparable<? super K> key,
-            SearchResults<K,V> start, Stack<SearchResults<K,V>> stack) {
+            SearchResults<K,V> start, Deque<SearchResults<K,V>> stack) {
         Node<K,V> node = start.node;
         Contents<K,V> contents = start.contents;
         int index = start.index;
@@ -2013,7 +2013,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     SearchResults<K,V> findPredecessor(Comparable<? super K> key) {
         if (key == null)
             throw new NullPointerException(); // don't postpone errors
-        Stack<SearchResults<K,V>> stack = new Stack<SearchResults<K,V>>();
+        Deque<SearchResults<K,V>> stack = new ArrayDeque<SearchResults<K,V>>();
         Node<K,V> node = this.root.node;
         Contents<K,V> contents = node.contents;
         int index = search(contents.keys, key);
