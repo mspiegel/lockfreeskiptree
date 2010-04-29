@@ -61,7 +61,7 @@ import java.util.concurrent.atomic.*;
  */
 @SuppressWarnings("unchecked")
 public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V> 
-    implements ConcurrentNavigableMap<K,V>,
+    implements ConcurrentChunkedMap<K,V>,
     Cloneable,
     java.io.Serializable    {
     
@@ -125,9 +125,11 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      *      all possible futures.
      */
     
-    private static final int logAvgLength = 5; // log_2 of the average node length
-    private static final int avgLength = (1 << logAvgLength);
-    private static final int avgLengthMinusOne = (avgLength - 1);
+    protected final static int DEFAULT_AVG_LENGTH = 32;
+    
+    private final int logAvgLength;
+    private final int avgLength;
+    private final int avgLengthMinusOne;
     
     private static final long serialVersionUID = -8380871345797974329L;
 
@@ -177,17 +179,21 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     /** Lazily initialized values collection */
     private transient Values valuesCollection;
     /** Lazily initialized descending key set */
-    private transient ConcurrentNavigableMap<K,V> descendingMap;
+    private transient ConcurrentChunkedMap<K,V> descendingMap;
     
     /** if non-null, then always return this proxy instead of storing values */
     private final V valueProxy;
-    
+        
     /**
      * Initializes or resets state. Needed by constructors, clone,
      * clear, readObject. and ConcurrentSkipListSet.clone.
      * (Note that comparator must be separately initialized.)
      */
     final void initialize() {
+        if ((avgLength <= 0) || (avgLength & (avgLength - 1)) != 0) {
+            throw new IllegalArgumentException("Illegal average length: " +
+                    avgLength);
+        }
         keySet = null;
         entrySet = null;
         valuesCollection = null;
@@ -203,20 +209,16 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     }
 
     /* ---------------- Constructors -------------- */
-    
-    
+
     public ConcurrentSkipTreeMap() {
         this.comparator = null;
         this.valueProxy = null;
-        initialize();      
-    }
-    
-    protected ConcurrentSkipTreeMap(V proxy) {
-        this.comparator = null;
-        this.valueProxy = proxy;
+        this.avgLength = DEFAULT_AVG_LENGTH;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(DEFAULT_AVG_LENGTH);        
+        this.avgLengthMinusOne = DEFAULT_AVG_LENGTH - 1;
         initialize();
     }
-    
+
     /**
      * Constructs a new, empty map, sorted according to the specified
      * comparator.
@@ -224,16 +226,13 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @param comparator the comparator that will be used to order this map.
      *        If <tt>null</tt>, the {@linkplain Comparable natural
      *        ordering} of the keys will be used.
-     */
+     */    
     public ConcurrentSkipTreeMap(Comparator<? super K> comparator) {
         this.comparator = comparator;
         this.valueProxy = null;
-        initialize();
-    }
-    
-    protected ConcurrentSkipTreeMap(Comparator<? super K> comparator, V proxy) {
-        this.comparator = comparator;
-        this.valueProxy = proxy;        
+        this.avgLength = DEFAULT_AVG_LENGTH;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(DEFAULT_AVG_LENGTH);        
+        this.avgLengthMinusOne = DEFAULT_AVG_LENGTH - 1;
         initialize();
     }
     
@@ -251,36 +250,85 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
     public ConcurrentSkipTreeMap(Map<? extends K, ? extends V> m) {
         this.comparator = null;
         this.valueProxy = null;
+        this.avgLength = DEFAULT_AVG_LENGTH;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(DEFAULT_AVG_LENGTH);        
+        this.avgLengthMinusOne = DEFAULT_AVG_LENGTH - 1;        
         initialize();
         putAll(m);
     }
-
-    protected ConcurrentSkipTreeMap(Map<? extends K, ? extends V> m, V proxy) {
-        this.comparator = null;
-        this.valueProxy = proxy;
-        initialize();
-        putAll(m);
-    }
-    
-    /**
-     * Constructs a new map containing the same mappings and using the
-     * same ordering as the specified sorted map.
-     *
-     * @param m the sorted map whose mappings are to be placed in this
-     *        map, and whose comparator is to be used to sort this map
-     * @throws NullPointerException if the specified sorted map or any of
-     *         its keys or values are null
-     */
+        
     public ConcurrentSkipTreeMap(SortedMap<K, ? extends V> m) {
         this.comparator = m.comparator();
         this.valueProxy = null;
+        this.avgLength = DEFAULT_AVG_LENGTH;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(DEFAULT_AVG_LENGTH);        
+        this.avgLengthMinusOne = DEFAULT_AVG_LENGTH - 1;
         initialize();
         buildFromSorted(m);
     }
     
+    public ConcurrentSkipTreeMap(int avgLength) {
+        this.comparator = null;
+        this.valueProxy = null;
+        this.avgLength = avgLength;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(avgLength);
+        this.avgLengthMinusOne = avgLength - 1;        
+        initialize();
+    }
+    
+    public ConcurrentSkipTreeMap(Comparator<? super K> comparator, int avgLength) {
+        this.comparator = comparator;
+        this.valueProxy = null;
+        this.avgLength = avgLength;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(avgLength);
+        this.avgLengthMinusOne = avgLength - 1;        
+        initialize();
+    }
+        
+    public ConcurrentSkipTreeMap(Map<? extends K, ? extends V> m, int avgLength) {
+        this.comparator = null;
+        this.valueProxy = null;
+        this.avgLength = avgLength;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(avgLength);
+        this.avgLengthMinusOne = avgLength - 1;        
+        initialize();
+        putAll(m);
+    }
+
+    public ConcurrentSkipTreeMap(SortedMap<K, ? extends V> m, int avgLength) {
+        this.comparator = m.comparator();
+        this.valueProxy = null;
+        this.avgLength = avgLength;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(avgLength);
+        this.avgLengthMinusOne = avgLength - 1;        
+        initialize();
+        buildFromSorted(m);
+    }
+        
+    protected ConcurrentSkipTreeMap(V proxy, int avgLength) {
+        this.comparator = null;
+        this.valueProxy = proxy;
+        this.avgLength = avgLength;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(avgLength);
+        this.avgLengthMinusOne = avgLength - 1;        
+        initialize();
+    }
+        
+    protected ConcurrentSkipTreeMap(Comparator<? super K> comparator, V proxy, int avgLength) {
+        this.comparator = comparator;
+        this.valueProxy = proxy;        
+        this.avgLength = avgLength;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(avgLength);
+        this.avgLengthMinusOne = avgLength - 1;
+        initialize();
+    }
+
     protected ConcurrentSkipTreeMap(SortedMap<K, ? extends V> m, V proxy) {
         this.comparator = m.comparator();
         this.valueProxy = proxy;
+        this.avgLength = DEFAULT_AVG_LENGTH;
+        this.logAvgLength = 31 - Integer.numberOfLeadingZeros(DEFAULT_AVG_LENGTH);        
+        this.avgLengthMinusOne = DEFAULT_AVG_LENGTH - 1;
         initialize();
         buildFromSorted(m);
     }
@@ -302,7 +350,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         clone.initialize();
         clone.buildFromSorted(this);
         return clone;
-    }    
+    }
     
     /**
      * Streamlined bulk insertion to initialize from elements of
@@ -448,6 +496,11 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
             put(key, val);
         }        
     }    
+    
+    public int expectedNodeSize() {
+        return(avgLength);
+    }
+    
 
     /* ---------------- Comparison utilities -------------- */
 
@@ -676,7 +729,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if {@code fromKey} or {@code toKey} is null
      * @throws IllegalArgumentException {@inheritDoc}
      */
-    public ConcurrentNavigableMap<K,V> subMap(K fromKey,
+    public ConcurrentChunkedMap<K,V> subMap(K fromKey,
                                               boolean fromInclusive,
                                               K toKey,
                                               boolean toInclusive) {
@@ -691,8 +744,8 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if {@code toKey} is null
      * @throws IllegalArgumentException {@inheritDoc}
      */
-    public ConcurrentNavigableMap<K,V> headMap(K toKey,
-                                               boolean inclusive) {
+    public ConcurrentChunkedMap<K,V> headMap(K toKey,
+                                             boolean inclusive) {
         if (toKey == null)
             throw new NullPointerException();
         return new SubMap<K,V>
@@ -704,7 +757,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if {@code fromKey} is null
      * @throws IllegalArgumentException {@inheritDoc}
      */
-    public ConcurrentNavigableMap<K,V> tailMap(K fromKey,
+    public ConcurrentChunkedMap<K,V> tailMap(K fromKey,
                                                boolean inclusive) {
         if (fromKey == null)
             throw new NullPointerException();
@@ -717,7 +770,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if {@code fromKey} or {@code toKey} is null
      * @throws IllegalArgumentException {@inheritDoc}
      */
-    public ConcurrentNavigableMap<K,V> subMap(K fromKey, K toKey) {
+    public ConcurrentChunkedMap<K,V> subMap(K fromKey, K toKey) {
         return subMap(fromKey, true, toKey, false);
     }
 
@@ -726,7 +779,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if {@code toKey} is null
      * @throws IllegalArgumentException {@inheritDoc}
      */
-    public ConcurrentNavigableMap<K,V> headMap(K toKey) {
+    public ConcurrentChunkedMap<K,V> headMap(K toKey) {
         return headMap(toKey, false);
     }
 
@@ -735,7 +788,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if {@code fromKey} is null
      * @throws IllegalArgumentException {@inheritDoc}
      */
-    public ConcurrentNavigableMap<K,V> tailMap(K fromKey) {
+    public ConcurrentChunkedMap<K,V> tailMap(K fromKey) {
         return tailMap(fromKey, true);
     }
     
@@ -814,7 +867,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                 if (node.casContents(contents, update)) {
                     return(retValue);
                 } else {
-                    results = moveForward(node, key);
+                    results = moveForward(node, key, index);
                 }
             }
         }
@@ -852,7 +905,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                 if (node.casContents(contents, update)) {
                     return(v);
                 } else {
-                    results = moveForward(node, key);
+                    results = moveForward(node, key, index);
                 }
             }
         }
@@ -1432,13 +1485,14 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
 	 *  
 	 * @param node  the starting node for the search
 	 * @param key   the target key
+	 * @param hint  the index of where to begin the search
 	 * @return      the {@link SearchResults} for the target key
 	 */
 	private static<K,V> SearchResults<K,V> moveForward(
-			Node<K,V> node, Comparable<? super K> key) {
+			Node<K,V> node, Comparable<? super K> key, int hint) {
 	    while(true) {
 	        Contents<K,V> contents = node.contents;
-	        int index = search(contents.keys, key);
+	        int index = searchWithHint(contents.keys, key, hint);
 	        if (index > -contents.keys.length - 1) {
                 return new SearchResults<K,V>(node, contents, index);	            
 	        } else {
@@ -1484,7 +1538,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
             if (node.casContents(contents, left)) {
                 return(right);
             } else {
-                results = moveForward(node, x);
+                results = moveForward(node, x, index);
             }
         }
     }
@@ -1511,7 +1565,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                 if (node.casContents(contents, update)) {
                     return(valueProxy == null ? (V) values[index] : valueProxy);
                 } else {
-                    results = moveForward(node, key);                    
+                    results = moveForward(node, key, index);
                 }
             } else {
                 index = - index - 1;
@@ -1522,7 +1576,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                 if (node.casContents(contents, update)) {
                     return(null);
                 } else {
-                    results = moveForward(node, key);
+                    results = moveForward(node, key, index);
                 }
             }
         }        
@@ -1551,7 +1605,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                 if (node.casContents(contents, update)) {
                     return((V) values[index]);
                 } else {
-                    results = moveForward(node, key);
+                    results = moveForward(node, key, index);
                 }
             } else {
                 index = - index - 1;
@@ -1564,7 +1618,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                     resultsStore[0] = newResults;
                     return(null);
                 } else {
-                    results = moveForward(node, key);
+                    results = moveForward(node, key, index);
                 }
             }
         }
@@ -1594,11 +1648,11 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                     resultsStore[target] = newResults;
                     return;
                 } else {
-                    results = moveForward(node, key);
+                    results = moveForward(node, key, index);
                 }
             } else {
-                assert(index == - contents.keys.length - 1);                
-                results = moveForward(node, key);
+                assert(index == - contents.keys.length - 1);
+                results = moveForward(node, key, -index - 1);
             }
         }
     }
@@ -1634,13 +1688,9 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         if (items == null) return(null);
         int length = items.length;
         Object[] newitems = new Object[length + 1];
-        for(int i = 0; i < index; i++) {
-            newitems[i] = items[i];
-        }
+        System.arraycopy(items, 0, newitems, 0, index);
+        System.arraycopy(items, index, newitems, index + 1, length - index);
         newitems[index] = x;
-        for(int i = index; i < length; i++) {
-            newitems[i + 1] = items[i];
-        }
         return(newitems);
     }    
     
@@ -1756,11 +1806,14 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
             } else {
                 Object okey = contents.keys[0];
                 V value = (valueProxy == null) ? (V) contents.values[0] : valueProxy;
-                if (okey == PositiveInfinity.INSTANCE) return null;
+                if (okey == PositiveInfinity.INSTANCE) return null;                
                 Object[] newkeys = removeSingleItem(contents.keys, 0);
                 Object[] newvalues = removeSingleItem(contents.values, 0);
                 Contents<K,V> update = new Contents<K,V>(newkeys, newvalues, null, contents.link);
                 if (node.casContents(contents, update)) {
+                    if (newkeys.length == 0) {
+                        leafHeadUpdater.compareAndSet(this, node, contents.link);
+                    }
                     return(new AbstractMap.SimpleImmutableEntry<K,V>((K) okey, value));
                 }
             }
@@ -2253,8 +2306,8 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         return (es != null) ? es : (entrySet = new EntrySet(this));
     }
 
-    public ConcurrentNavigableMap<K,V> descendingMap() {
-        ConcurrentNavigableMap<K,V> dm = descendingMap;
+    public ConcurrentChunkedMap<K,V> descendingMap() {
+        ConcurrentChunkedMap<K,V> dm = descendingMap;
         return (dm != null) ? dm : (descendingMap = new SubMap<K,V>
                                     (this, null, false, null, false, true));
     }
@@ -2299,6 +2352,31 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         
         return -(low + 1);  // key not found.
     }
+
+    private static<K> int searchWithHint(Object[] a, Comparable<? super K> key, int hint) {
+        int low = 0, mid = hint;
+        int high = a.length - 1;
+        
+        if (low > high) return(-1);
+        if (a[high] == PositiveInfinity.INSTANCE) high--;
+        
+        if (mid > high) mid = (low + high) >>> 1;
+        
+        while (low <= high) {
+            K midVal = (K) a[mid];
+            int cmp = key.compareTo(midVal);
+
+            if (cmp > 0)
+                low = mid + 1;
+            else if (cmp < 0)
+                high = mid - 1;
+            else
+                return mid; // key found
+            mid = (low + high) >>> 1;            
+        }
+        
+        return -(low + 1);  // key not found.
+    }
     
     /**
      * Returns a random level for inserting a new node.
@@ -2333,8 +2411,8 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         }
 
         static final class KeySet<E> extends AbstractSet<E> implements NavigableSet<E> {
-            private final ConcurrentNavigableMap<E,Object> m;
-            KeySet(ConcurrentNavigableMap<E,Object> map) { m = map; }
+            private final ConcurrentChunkedMap<E,Object> m;
+            KeySet(ConcurrentChunkedMap<E,Object> map) { m = map; }
             public int size() { return m.size(); }
             public boolean isEmpty() { return m.isEmpty(); }
             public boolean contains(Object o) { return m.containsKey(o); }
@@ -2409,8 +2487,8 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         }
 
         static final class Values<E> extends AbstractCollection<E> {
-            private final ConcurrentNavigableMap<Object, E> m;
-            Values(ConcurrentNavigableMap<Object, E> map) {
+            private final ConcurrentChunkedMap<Object, E> m;
+            Values(ConcurrentChunkedMap<Object, E> map) {
                 m = map;
             }
             public Iterator<E> iterator() {
@@ -2436,8 +2514,8 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
         }
 
         static final class EntrySet<K1,V1> extends AbstractSet<Map.Entry<K1,V1>> {
-            private final ConcurrentNavigableMap<K1, V1> m;
-            EntrySet(ConcurrentNavigableMap<K1, V1> map) {
+            private final ConcurrentChunkedMap<K1, V1> m;
+            EntrySet(ConcurrentChunkedMap<K1, V1> map) {
                 m = map;
             }
 
@@ -2503,7 +2581,7 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
      * @serial include
      */
     static final class SubMap<K,V> extends AbstractMap<K,V>
-        implements ConcurrentNavigableMap<K,V>, Cloneable,
+        implements ConcurrentChunkedMap<K,V>, Cloneable,
                    java.io.Serializable {
         private static final long serialVersionUID = -7647078645895051609L;
 
@@ -3105,6 +3183,10 @@ public class ConcurrentSkipTreeMap<K,V> extends AbstractMap<K,V>
                 K k = (K) n.contents.keys[n.index];
                 return new AbstractMap.SimpleImmutableEntry<K,V>(k, v);
             }
+        }
+
+        public int expectedNodeSize() {
+            return m.expectedNodeSize();
         }
     }
 

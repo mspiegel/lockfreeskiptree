@@ -8,7 +8,6 @@
 package edu.virginia.cs.skiptree;
 import java.lang.reflect.Field;
 import java.util.*;
-import java.util.concurrent.*;
 
 import sun.misc.Unsafe;
 
@@ -52,7 +51,7 @@ import sun.misc.Unsafe;
  */
 @SuppressWarnings("unchecked")
 public class ConcurrentSkipTreeSet<E>
-    extends AbstractSet<E>
+    extends AbstractChunkedSet<E>
     implements NavigableSet<E>, Cloneable, java.io.Serializable {
 
     /**
@@ -65,15 +64,16 @@ public class ConcurrentSkipTreeSet<E>
      * element.  This field is declared final for the sake of thread
      * safety, which entails some ugliness in clone()
      */
-    private final ConcurrentNavigableMap<E,Object> m;
+    private final ConcurrentChunkedMap<E,Object> m;
 
     /**
      * Constructs a new, empty set that orders its elements according to
      * their {@linkplain Comparable natural ordering}.
      */
     public ConcurrentSkipTreeSet() {
-        m = new ConcurrentSkipTreeMap<E,Object>(Boolean.TRUE);
-    }        
+        m = new ConcurrentSkipTreeMap<E,Object>(Boolean.TRUE, 
+                ConcurrentSkipTreeMap.DEFAULT_AVG_LENGTH);
+    }
 
     /**
      * Constructs a new, empty set that orders its elements according to
@@ -84,7 +84,8 @@ public class ConcurrentSkipTreeSet<E>
      *        ordering} of the elements will be used.
      */
     public ConcurrentSkipTreeSet(Comparator<? super E> comparator) {
-        m = new ConcurrentSkipTreeMap<E,Object>(comparator, Boolean.TRUE);
+        m = new ConcurrentSkipTreeMap<E,Object>(comparator, Boolean.TRUE,
+                ConcurrentSkipTreeMap.DEFAULT_AVG_LENGTH);
     }
 
     /**
@@ -99,7 +100,8 @@ public class ConcurrentSkipTreeSet<E>
      *         of its elements are null
      */
     public ConcurrentSkipTreeSet(Collection<? extends E> c) {
-        m = new ConcurrentSkipTreeMap<E,Object>(Boolean.TRUE);
+        m = new ConcurrentSkipTreeMap<E,Object>(Boolean.TRUE,
+                ConcurrentSkipTreeMap.DEFAULT_AVG_LENGTH);
         addAll(c);
     }
 
@@ -112,14 +114,26 @@ public class ConcurrentSkipTreeSet<E>
      *         of its elements are null
      */
     public ConcurrentSkipTreeSet(SortedSet<E> s) {
-        m = new ConcurrentSkipTreeMap<E,Object>(s.comparator(), Boolean.TRUE);
+        m = new ConcurrentSkipTreeMap<E,Object>(s.comparator(), Boolean.TRUE,
+                ConcurrentSkipTreeMap.DEFAULT_AVG_LENGTH);
         addAll(s);
     }
+    
+    public ConcurrentSkipTreeSet(AbstractChunkedSet<E> s) {
+        m = new ConcurrentSkipTreeMap<E,Object>(s.comparator(), Boolean.TRUE,
+                s.expectedNodeSize());
+        addAll(s);
+    }
+    
+    public ConcurrentSkipTreeSet(int avgLength) {
+        m = new ConcurrentSkipTreeMap<E,Object>(Boolean.TRUE, avgLength);
+    }
+
 
     /**
      * For use by submaps
      */
-    ConcurrentSkipTreeSet(ConcurrentNavigableMap<E,Object> m) {
+    ConcurrentSkipTreeSet(ConcurrentChunkedMap<E,Object> m) {
         this.m = m;
     }
 
@@ -131,13 +145,12 @@ public class ConcurrentSkipTreeSet<E>
      */
     public ConcurrentSkipTreeSet<E> clone() {
         ConcurrentSkipTreeSet<E> clone = null;
-    try {
-        clone = (ConcurrentSkipTreeSet<E>) super.clone();
-            clone.setMap(new ConcurrentSkipTreeMap(m, Boolean.TRUE));
-    } catch (CloneNotSupportedException e) {
-        throw new InternalError();
-    }
-
+        try {
+            clone = (ConcurrentSkipTreeSet<E>) super.clone();
+                clone.setMap(new ConcurrentSkipTreeMap(m, Boolean.TRUE));
+        } catch (CloneNotSupportedException e) {
+            throw new InternalError();
+        }
         return clone;
     }
 
@@ -470,8 +483,12 @@ public class ConcurrentSkipTreeSet<E>
                 (ConcurrentSkipTreeSet.class.getDeclaredField("m"));
         } catch (Exception ex) { throw new Error(ex); }
     }
-    private void setMap(ConcurrentNavigableMap<E,Object> map) {
+    private void setMap(ConcurrentChunkedMap<E,Object> map) {
         unsafe.putObjectVolatile(this, mapOffset, map);
+    }
+
+    int expectedNodeSize() {
+        return m.expectedNodeSize();
     }    
     
 }
